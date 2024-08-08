@@ -1,0 +1,7 @@
+---
+- name: Setup Zookeeper and Kafka
+  hosts: kafka
+  become: yes
+  roles:
+    - kafka
+

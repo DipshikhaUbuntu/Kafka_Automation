@@ -1,0 +1,5 @@
+[kafka]
+ansible_host_01 ansible_host=13.52.235.74
+ansible_host_02 ansible_host=13.57.202.178
+ansible_host_03 ansible_host=54.193.78.250
+

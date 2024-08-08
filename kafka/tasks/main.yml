@@ -1,0 +1,170 @@
+---
+- name: Ensure kafka group exists
+  ansible.builtin.group:
+    name: "{{ kafka_group }}"
+    state: present
+
+- name: Ensure kafka user exists
+  ansible.builtin.user:
+    name: "{{ kafka_user }}"
+    group: "{{ kafka_group }}"
+    create_home: yes
+
+- name: Install Java
+  ansible.builtin.package:
+    name: openjdk-11-jdk
+    state: present
+
+- name: Install required packages for extracting archives
+  ansible.builtin.package:
+    name: 
+      - tar
+      - gzip
+      - bzip2
+      - unzip
+    state: present
+
+- name: Create Zookeeper installation directory
+  ansible.builtin.file:
+    path: "{{ zookeeper_install_dir }}"
+    state: directory
+    owner: "{{ kafka_user }}"
+    group: "{{ kafka_group }}"
+    mode: '0755'
+
+- name: Download Zookeeper
+  ansible.builtin.get_url:
+    url: "{{ zookeeper_download_url }}"
+    dest: "/tmp/zookeeper.tar.gz"
+    mode: '0755'
+
+- name: Extract Zookeeper
+  ansible.builtin.command:
+    cmd: tar -xvf /tmp/zookeeper.tar.gz -C {{ zookeeper_install_dir }}
+  become: yes
+
+- name: Create symlink for zookeeper
+  ansible.builtin.command:
+    cmd: ln -s {{ zookeeper_install_dir }}/apache-zookeeper-{{ zookeeper_version }}-bin {{ zookeeper_install_dir }}/zookeeper
+    creates: "{{ zookeeper_install_dir }}/zookeeper"
+  become: yes
+
+- name: Change ownership of zookeeper directory
+  ansible.builtin.file:
+    path: "{{ zookeeper_install_dir }}"
+    owner: "{{ kafka_user }}"
+    group: "{{ kafka_group }}"
+    state: directory
+    recurse: yes
+
+- name: Template Zookeeper config
+  ansible.builtin.template:
+    src: zoo.cfg.j2
+    dest: "{{ zookeeper_install_dir }}/zookeeper/conf/zoo.cfg"
+    owner: "{{ kafka_user }}"
+    group: "{{ kafka_group }}"
+    mode: '0644'
+
+- name: Template Zookeeper systemd service
+  ansible.builtin.template:
+    src: zookeeper.service.j2
+    dest: /etc/systemd/system/zookeeper.service
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: yes
+
+- name: Enable and start Zookeeper service
+  ansible.builtin.systemd:
+    name: zookeeper
+    enabled: yes
+    state: started
+
+- name: Create Kafka installation directory
+  ansible.builtin.file:
+    path: "{{ kafka_install_dir }}"
+    state: directory
+    owner: "{{ kafka_user }}"
+    group: "{{ kafka_group }}"
+    mode: '0755'
+
+- name: Download Kafka
+  ansible.builtin.get_url:
+    url: "{{ kafka_download_url }}"
+    dest: "/tmp/kafka.tgz"
+    mode: '0755'
+
+- name: Extract Kafka
+  ansible.builtin.unarchive:
+    src: "/tmp/kafka.tgz"
+    dest: "{{ kafka_install_dir }}"
+    remote_src: yes
+
+- name: Create symlink for kafka
+  ansible.builtin.command:
+    cmd: ln -s {{ kafka_install_dir }}/kafka_{{ scala_version }}-{{ kafka_version }} {{ kafka_install_dir }}/kafka
+    creates: "{{ kafka_install_dir }}/kafka"
+  become: yes
+
+- name: Change ownership of kafka directory
+  ansible.builtin.file:
+    path: "{{ kafka_install_dir }}"
+    owner: "{{ kafka_user }}"
+    group: "{{ kafka_group }}"
+    state: directory
+    recurse: yes
+
+- name: Template Kafka server properties
+  ansible.builtin.template:
+    src: server.properties.j2
+    dest: "{{ kafka_install_dir }}/kafka/config/server.properties"
+    owner: "{{ kafka_user }}"
+    group: "{{ kafka_group }}"
+    mode: '0644'
+  notify:
+    - restart kafka
+
+- name: Template Kafka zookeeper properties
+  ansible.builtin.template:
+    src: zookeeper.properties.j2
+    dest: "{{ kafka_install_dir }}/kafka/config/zookeeper.properties"
+    owner: "{{ kafka_user }}"
+    group: "{{ kafka_group }}"
+    mode: '0644'
+  notify:
+    - restart kafka
+
+- name: Template Kafka systemd service
+  ansible.builtin.template:
+    src: kafka.service.j2
+    dest: /etc/systemd/system/kafka.service
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: yes
+
+- name: Enable and start Kafka service
+  ansible.builtin.systemd:
+    name: kafka
+    enabled: yes
+    state: started
+
+- name: Check Kafka logs if service fails to start
+  ansible.builtin.shell: |
+    if ! systemctl is-active --quiet kafka; then
+      journalctl -u kafka.service
+    fi
+  ignore_errors: yes
+  register: kafka_log_output
+
+- name: Print Kafka log output
+  ansible.builtin.debug:
+    msg: "{{ kafka_log_output.stdout_lines }}"
+  when: kafka_log_output is defined
+
