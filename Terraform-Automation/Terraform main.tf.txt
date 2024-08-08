@@ -1,0 +1,66 @@
+provider "aws" {
+  region = var.region
+}
+
+resource "aws_instance" "kafka" {
+  ami           = var.ami_id
+  instance_type = var.instance_type
+  key_name      = var.key_name
+
+  tags = {
+    Name = "KafkaServer"
+  }
+
+  user_data = <<-EOF
+              #!/bin/bash
+              set -e
+              apt-get update -y
+              apt-get install -y openjdk-11-jre-headless wget
+              wget https://downloads.apache.org/kafka/${var.kafka_version}/kafka_${var.kafka_scala_version}-${var.kafka_version}.tgz
+              tar -xzf kafka_${var.kafka_scala_version}-${var.kafka_version}.tgz
+              mv kafka_${var.kafka_scala_version}-${var.kafka_version} /usr/local/kafka
+
+              # Reduce Kafka memory settings
+              sed -i 's/Xmx1G/Xmx128M/' /usr/local/kafka/config/server.properties
+              sed -i 's/Xms1G/Xms128M/' /usr/local/kafka/config/server.properties
+
+              cat <<EOT >> /etc/systemd/system/zookeeper.service
+              [Unit]
+              Description=Zookeeper
+              Documentation=http://zookeeper.apache.org
+              Requires=network.target remote-fs.target
+              After=network.target remote-fs.target
+
+              [Service]
+              Type=simple
+              ExecStart=/usr/local/kafka/bin/zookeeper-server-start.sh /usr/local/kafka/config/zookeeper.properties
+              ExecStop=/usr/local/kafka/bin/zookeeper-server-stop.sh
+              Restart=on-abnormal
+
+              [Install]
+              WantedBy=multi-user.target
+              EOT
+
+              cat <<EOT >> /etc/systemd/system/kafka.service
+              [Unit]
+              Description=Kafka
+              Documentation=http://kafka.apache.org
+              Requires=zookeeper.service
+              After=zookeeper.service
+
+              [Service]
+              Type=simple
+              ExecStart=/usr/local/kafka/bin/kafka-server-start.sh /usr/local/kafka/config/server.properties
+              ExecStop=/usr/local/kafka/bin/kafka-server-stop.sh
+              Restart=on-abnormal
+
+              [Install]
+              WantedBy=multi-user.target
+              EOT
+
+              systemctl enable zookeeper
+              systemctl enable kafka
+              systemctl start zookeeper
+              systemctl start kafka
+              EOF
+}
